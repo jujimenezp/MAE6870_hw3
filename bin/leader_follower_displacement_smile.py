@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import PillowWriter
 import rps.robotarium as robotarium
 from rps.utilities.transformations import create_si_to_uni_dynamics
 from rps.utilities.graph import completeGL, topological_neighbors
@@ -111,6 +113,8 @@ state = 0
 # PLOT INITIALIZATION
 # =========================================================
 ax = r._axes_handle
+fig = r._fig
+writer = PillowWriter(fps=20)
 
 marker_size_goal = determine_marker_size(r, 0.20)
 font_size        = determine_font_size(r, 0.05)
@@ -184,60 +188,66 @@ center_waypoint_list = [] # Current formation center and waypoint
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
-for t in range(iterations):
-    x = r.get_poses()
-    dxi = np.zeros((2, N))
-    waypoint = waypoints[:, state]
-    c = np.average(x[:2,:] - desired_positions, axis=1)
+with writer.saving(fig, "results/leader_follower_displacement_smile.gif", dpi=300):
+    for t in range(iterations):
+        x = r.get_poses()
+        dxi = np.zeros((2, N))
+        waypoint = waypoints[:, state]
+        c = np.average(x[:2,:] - desired_positions, axis=1)
+
+            # ---------------------------------------------------------
+        # Record sensor data
+        # ---------------------------------------------------------
+        vicon_list.append(x)
+        center_waypoint_list.append([state,waypoint[0],waypoint[1],c[0],c[1]])
+
+        # 1. Formation control
+        for i in range(N):
+            neighbors = topological_neighbors(L, i)
+            for j in neighbors:
+                dxi[:, i] += formation_control_gain * ((x[:2,j]-desired_positions[:,j]) - (x[:2,i]-desired_positions[:,i]))
+            dxi[:,i] += waypoint_seeking_gain * (waypoint - (x[:2,i]-desired_positions[:,i]))
+
+        # Advance waypoint state if leader is close
+        if np.linalg.norm(waypoint - c) < close_enough:
+            state = (state + 1) % waypoints.shape[1]
+
+        # 3. Velocity thresholding (3/4 of max linear velocity)
+        # Applied only to followers (Indices 1 to N-1)
+        norms = np.linalg.norm(dxi, axis=0)
+        threshold = 0.75 * r.MAX_LINEAR_VELOCITY
+        to_thresh = (norms > threshold)
+        
+        if np.any(to_thresh):
+            dxi[:, to_thresh] *= threshold / norms[to_thresh]
+
+        # 4. Conversion and Safety
+        # Convert SI velocities to unicycle commands
+        dxu = si_to_uni_dyn(dxi, x)
+        # Apply barrier certificate in unicycle space
+        dxu = uni_barrier_cert(dxu, x)
 
         # ---------------------------------------------------------
-    # Record sensor data
-    # ---------------------------------------------------------
-    vicon_list.append(x)
-    center_waypoint_list.append([state,waypoint[0],waypoint[1],c[0],c[1]])
+        # Update plot handles
+        # ---------------------------------------------------------
+        # Follower labels track their robots  
+        c_plot.set_offsets([c[0],c[1]])
 
-    # 1. Formation control
-    for i in range(N):
-        neighbors = topological_neighbors(L, i)
-        for j in neighbors:
-            dxi[:, i] += formation_control_gain * ((x[:2,j]-desired_positions[:,j]) - (x[:2,i]-desired_positions[:,i]))
-        dxi[:,i] += waypoint_seeking_gain * (waypoint - (x[:2,i]-desired_positions[:,i]))
+        for q in range(N):
+            follower_labels[q].set_position((x[0, q] - 0.15, x[1, q] + 0.15))
 
-    # Advance waypoint state if leader is close
-    if np.linalg.norm(waypoint - c) < close_enough:
-        state = (state + 1) % waypoints.shape[1]
+        # Follower-follower graph edges
+        for m in range(len(rows)):
+            lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
+            lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
 
-    # 3. Velocity thresholding (3/4 of max linear velocity)
-    # Applied only to followers (Indices 1 to N-1)
-    norms = np.linalg.norm(dxi, axis=0)
-    threshold = 0.75 * r.MAX_LINEAR_VELOCITY
-    to_thresh = (norms > threshold)
-    
-    if np.any(to_thresh):
-        dxi[:, to_thresh] *= threshold / norms[to_thresh]
+        # GIF
+        writer.grab_frame()
 
-    # 4. Conversion and Safety
-    # Convert SI velocities to unicycle commands
-    dxu = si_to_uni_dyn(dxi, x)
-    # Apply barrier certificate in unicycle space
-    dxu = uni_barrier_cert(dxu, x)
+        r.set_velocities(np.arange(N), dxu)
+        r.step()
 
-    # ---------------------------------------------------------
-    # Update plot handles
-    # ---------------------------------------------------------
-    # Follower labels track their robots  
-    c_plot.set_offsets([c[0],c[1]])
-
-    for q in range(N):
-        follower_labels[q].set_position((x[0, q] - 0.15, x[1, q] + 0.15))
-
-    # Follower-follower graph edges
-    for m in range(len(rows)):
-        lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
-        lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
-
-    r.set_velocities(np.arange(N), dxu)
-    r.step()
+plt.close(fig)
 
 # =========================================================
 # SAVE DATA
