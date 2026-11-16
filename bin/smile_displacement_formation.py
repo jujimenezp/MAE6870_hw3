@@ -1,4 +1,7 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image as img
+import io
 import rps.robotarium as robotarium
 from rps.utilities.graph import topological_neighbors
 from rps.utilities.transformations import create_si_to_uni_dynamics
@@ -30,7 +33,7 @@ def determine_font_size(robotarium_instance, font_height_meters):
 # SIMULATION PARAMETERS
 # =========================================================
 N = 8
-iterations = 2000
+iterations = 1800
 formation_control_gain = 10
 
 # =========================================================
@@ -44,15 +47,15 @@ vicon_list      = []
 # ROBOTARIUM INITIALIZATION
 # =========================================================
 # Initializing with the updated Width/Height/Spacing from MATLAB
-initial_conditions = generate_random_poses(
-    N, 
-    width=2.5, 
-    height=1.5, 
-    spacing=0.6
-)
-# initial_conditions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826,  1.10838442, 1.11857774,  0.57111998],
-#  [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, -0.56014792, 0.28568192,  0.66814097],
-#  [-1.39302643,  0.58631807, -2.84446966, -0.57210556,  2.03477767,  0.44730757, -2.79137411,  0.06005052]])
+# initial_conditions = generate_random_poses(
+#     N, 
+#     width=2.5, 
+#     height=1.5, 
+#     spacing=0.6
+# )
+initial_conditions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826,  1.10838442, 1.11857774,  0.57111998],
+ [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, -0.56014792, 0.28568192,  0.66814097],
+ [-1.39302643,  0.58631807, -2.84446966, -0.57210556,  2.03477767,  0.44730757, -2.79137411,  0.06005052]])
 print(initial_conditions)
 
 r = robotarium.Robotarium(
@@ -108,6 +111,8 @@ si_to_uni_dyn = create_si_to_uni_dynamics(
 # PLOT INITIALIZATION
 # =========================================================
 ax = r._axes_handle
+fig = r._fig
+frames = []
 
 # One colour per robot
 CM = ['k', 'b', 'r', 'g', 'yellow', 'purple', 'orange', 'cyan']
@@ -201,15 +206,34 @@ for t in range(int(iterations)):
     for m in range(len(rows)):
         lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
         lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
+
+    # GIF
+    if t%3 == 0:
+        # Save figure to an in-memory buffer
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=300)
+        buf.seek(0)
+        frames.append(img.open(buf))
     
     r.set_velocities(np.arange(N), dxu)
     r.step()
+
+plt.close(fig)
 
 # =========================================================
 # SAVE DATA
 # =========================================================
 # Stack list of (K, N) frames into (K, N, T) arrays
 np.save('smile_displacement_formation.npy',      np.stack(vicon_list,      axis=2))
+
+# GIF
+frames[0].save(
+    "results/smile_displacement_formation.gif",
+    save_all=True,
+    append_images=frames[1:],
+    duration=50,  # Milliseconds per frame (50ms = 20 fps)
+    loop=0        # 0 = infinite loop; 1 = play once
+)
 
 # Final debug report
 r.debug()
