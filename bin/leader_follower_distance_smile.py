@@ -283,7 +283,8 @@ with writer.saving(fig, "results/leader_follower_distance_smile.gif", dpi=150):
             lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
 
         # GIF
-        writer.grab_frame()
+        if t%3 == 0:
+            writer.grab_frame()
 
         # Leader label and leader-follower edge
         leader_label.set_position((x[0, 0] - 0.15, x[1, 0] + 0.15))

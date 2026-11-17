@@ -35,8 +35,8 @@ def determine_font_size(robotarium_instance, font_height_meters):
 # =========================================================
 N = 8
 iterations = 3800 
-formation_control_gain = 5
-waypoint_seeking_gain = 2
+formation_control_gain = 0.5
+waypoint_seeking_gain = 1
 
 # =========================================================
 # ROBOTARIUM INITIALIZATION
@@ -47,9 +47,12 @@ waypoint_seeking_gain = 2
 # initial_positions = np.array([[0.72416207, -0.83013509, -0.23069515,  0.0244063,  -0.85609484,  0.58131926, -0.89487632,  0.36658478],
 #  [0.190459, 0.10231923, -0.53789058,  0.22193699,  0.60312492, -0.42308516,  -0.60768184,  0.59231836],
 #  [1.47898623, -0.03715629, -2.28639774,  2.49903487,  0.12847625, -0.06118225, -0.47299734, -0.65795879]])
-initial_positions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826,  1.10838442, -0.28568192,  0.57111998],
- [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, -0.56014792, 0.7657849,  0.66814097],
+initial_positions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826, -0.28568192, 1.10838442,  0.57111998],
+ [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, 0.7657849, -0.56014792,  0.66814097],
  [-1.39302643,  0.58631807, -2.84446966, -0.57210556,  2.03477767,  0.44730757, -2.79137411,  0.06005052]])
+# initial_positions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826,  1.10838442, -0.28568192,  0.57111998],
+#  [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, -0.56014792, 0.7657849,  0.66814097],
+#  [-1.39302643,  0.58631807, -2.84446966, -0.57210556,  2.03477767,  0.44730757, -2.79137411,  0.06005052]])
 r = robotarium.Robotarium(
     number_of_robots=N, 
     show_figure=True, 
@@ -91,17 +94,10 @@ desired_positions = np.array([[-0.7, -0.45, 0., 0.45, 0.7, -0.35, 0.35, 0.],
 # CONTROLLER AND SAFETY SETUP
 # =========================================================
 # SI-to-Uni mapping with specific MATLAB gain (0.8)
-si_to_uni_dyn = create_si_to_uni_dynamics(linear_velocity_gain=0.8)
+si_to_uni_dyn = create_si_to_uni_dynamics(linear_velocity_gain=0.7)
 
 # Unicycle-space barrier certificate
 uni_barrier_cert = create_uni_barrier_certificate_with_boundary()
-
-# Leader controller drives the robot toward waypoints
-leader_controller = create_si_position_controller(
-    x_velocity_gain=0.8, 
-    y_velocity_gain=0.8, 
-    velocity_magnitude_limit=0.1
-)
 
 # =========================================================
 # WAYPOINT INITIALIZATION
@@ -245,7 +241,8 @@ with writer.saving(fig, "results/leader_follower_displacement_smile.gif", dpi=15
             lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
 
         # GIF
-        writer.grab_frame()
+        if t%3 == 0:
+            writer.grab_frame()
 
         r.set_velocities(np.arange(N), dxu)
         r.step()
