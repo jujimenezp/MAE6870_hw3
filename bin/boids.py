@@ -1,5 +1,4 @@
 import numpy as np
-from matplotlib.animation import FFMpegWriter
 import rps.robotarium as robotarium
 from rps.utilities.transformations import create_si_to_uni_dynamics
 from rps.utilities.graph import completeGL, topological_neighbors
@@ -92,10 +91,6 @@ state = 0
 # PLOT INITIALIZATION
 # =========================================================
 ax = r._axes_handle
-fig = r._fig
-
-# GIF
-writer = FFMpegWriter(fps=20)
 
 marker_size_goal = determine_marker_size(r, 0.20)
 font_size        = determine_font_size(r, 0.05)
@@ -157,82 +152,79 @@ center_waypoint_list = [] # Current formation center and waypoint
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
-with writer.saving(fig, "results/boids_sim.mp4", dpi=150):
-    for t in range(iterations):
-        x = r.get_poses()
-        u = np.zeros((2, N))
-        waypoint = waypoints[:, state]
-        c = np.average(x[:2,:], axis=1)
+for t in range(iterations):
+    x = r.get_poses()
+    u = np.zeros((2, N))
+    waypoint = waypoints[:, state]
+    c = np.average(x[:2,:], axis=1)
 
-        # ---------------------------------------------------------
-        # Record sensor data
-        # ---------------------------------------------------------
-        vicon_list.append(x)
-        center_waypoint_list.append([state,waypoint[0],waypoint[1],c[0],c[1]])
+    # ---------------------------------------------------------
+    # Record sensor data
+    # ---------------------------------------------------------
+    vicon_list.append(x)
+    center_waypoint_list.append([state,waypoint[0],waypoint[1],c[0],c[1]])
 
-        # -----------------------------------
-        # Update adjacency matrix, Laplacian, and weights
-        # -----------------------------------
-        adjacency_mat = adj_matrix(x[:2,:])
-        L = np.diag(np.sum(adjacency_mat, axis=1)) - adjacency_mat
+    # -----------------------------------
+    # Update adjacency matrix, Laplacian, and weights
+    # -----------------------------------
+    adjacency_mat = adj_matrix(x[:2,:])
+    L = np.diag(np.sum(adjacency_mat, axis=1)) - adjacency_mat
 
-        # 1. Formation control
-        for i in range(N):
-            neighbors = topological_neighbors(L, i)
-            for j in neighbors:
-                # separation
-                u[:, i] += k_s* (x[:2, i]-x[:2, j])/(np.sum((x[:2, i]-x[:2, j])**2)+eps**2)
-                # alignment
-                u[:,i] += k_a/len(neighbors) * (dxi[:,j] - dxi[:,i])
-                # cohesion
-                u[:,i] += k_c/len(neighbors) * (x[:2,j] - x[:2,i])
-            # Waypoint tracking (b_i = 1 for all i)
-            u[:,i] += k_p*(waypoint - x[:2,i]) - k_v * dxi[:,i]
+    # 1. Formation control
+    for i in range(N):
+        neighbors = topological_neighbors(L, i)
+        for j in neighbors:
+            # separation
+            u[:, i] += k_s* (x[:2, i]-x[:2, j])/(np.sum((x[:2, i]-x[:2, j])**2)+eps**2)
+            # alignment
+            u[:,i] += k_a/len(neighbors) * (dxi[:,j] - dxi[:,i])
+            # cohesion
+            u[:,i] += k_c/len(neighbors) * (x[:2,j] - x[:2,i])
+        # Waypoint tracking (b_i = 1 for all i)
+        u[:,i] += k_p*(waypoint - x[:2,i]) - k_v * dxi[:,i]
 
-        dxi += dt*u
+    dxi += dt*u
 
-        # Advance waypoint state if leader is close
-        dist_to_waypoint = np.array([np.linalg.norm(x[:2,i] - waypoint) for i in range(N)])
-        if min(dist_to_waypoint) < close_enough:
-            state = (state + 1) % waypoints.shape[1]
+    # Advance waypoint state if leader is close
+    dist_to_waypoint = np.array([np.linalg.norm(x[:2,i] - waypoint) for i in range(N)])
+    if min(dist_to_waypoint) < close_enough:
+        state = (state + 1) % waypoints.shape[1]
 
-        # 3. Velocity thresholding (3/4 of max linear velocity)
-        norms = np.linalg.norm(dxi, axis=0)
-        threshold = 0.75 * r.MAX_LINEAR_VELOCITY
-        to_thresh = (norms > threshold)
+    # 3. Velocity thresholding (3/4 of max linear velocity)
+    norms = np.linalg.norm(dxi, axis=0)
+    threshold = 0.75 * r.MAX_LINEAR_VELOCITY
+    to_thresh = (norms > threshold)
 
-        if np.any(to_thresh):
-            dxi[:, to_thresh] *= threshold / norms[to_thresh]
+    if np.any(to_thresh):
+        dxi[:, to_thresh] *= threshold / norms[to_thresh]
 
-        # 4. Conversion and Safety
-        # Convert SI velocities to unicycle commands
-        dxu = si_to_uni_dyn(dxi, x)
-        # Apply barrier certificate in unicycle space
-        dxu = uni_barrier_cert(dxu, x)
+    # 4. Conversion and Safety
+    # Convert SI velocities to unicycle commands
+    dxu = si_to_uni_dyn(dxi, x)
+    # Apply barrier certificate in unicycle space
+    dxu = uni_barrier_cert(dxu, x)
 
-        # ---------------------------------------------------------
-        # Update plot handles
-        # ---------------------------------------------------------
-        # Follower labels track their robots  
-        c_plot.set_offsets([c[0],c[1]])
+    # ---------------------------------------------------------
+    # Update plot handles
+    # ---------------------------------------------------------
+    # Follower labels track their robots  
+    c_plot.set_offsets([c[0],c[1]])
 
-        for m in range(len(rows)):
-            lf[m].remove()
-        # Edges (blue): L == 1 gives the directed edge source
-        rows, cols = np.where(L == -1)
-        # Each undirected edge appears once as a directed entry with value 1
-        lf = []
-        for k in range(len(rows)):
-            line, = ax.plot([x[0, rows[k]], x[0, cols[k]]],
-                            [x[1, rows[k]], x[1, cols[k]]],
-                            color='b', linewidth=line_width, zorder=1)
-            lf.append(line)
+    for m in range(len(rows)):
+        lf[m].remove()
+    # Edges (blue): L == 1 gives the directed edge source
+    rows, cols = np.where(L == -1)
+    # Each undirected edge appears once as a directed entry with value 1
+    lf = []
+    for k in range(len(rows)):
+        line, = ax.plot([x[0, rows[k]], x[0, cols[k]]],
+                        [x[1, rows[k]], x[1, cols[k]]],
+                        color='b', linewidth=line_width, zorder=1)
+        lf.append(line)
 
-        # GIF
-        writer.grab_frame()
 
-        r.set_velocities(np.arange(N), dxu)
-        r.step()
+    r.set_velocities(np.arange(N), dxu)
+    r.step()
 
 # =========================================================
 # SAVE DATA
