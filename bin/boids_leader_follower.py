@@ -45,7 +45,16 @@ radius = 0.75
 # =========================================================
 # ROBOTARIUM INITIALIZATION
 # =========================================================
-initial_positions = generate_random_poses(N, width=2.6, height=1.3)
+#initial_positions = generate_random_poses(N, width=2.6, height=1.3)
+initial_positions = np.array([[-0.9992209 ,  0.28321623,  0.90871601,  1.02558021, -0.5912359 ,
+         0.20542356, -1.25778341, -0.3406298 ,  0.47446269, -0.07931621,
+         1.26279217,  1.22038745],
+       [ 0.57694281,  0.12331217, -0.20646003,  0.61395032, -0.28886853,
+        -0.60313725, -0.21284467,  0.42538513,  0.58611979, -0.19908898,
+         0.19146862, -0.63949412],
+       [-2.64683027,  2.87979268,  1.69410648,  1.96011402,  2.00228801,
+        -1.73499395, -2.59374404, -1.9499213 , -1.84372041, -2.51696462,
+        -2.89302544,  2.19846471]])
 print(initial_positions)
 r = robotarium.Robotarium(number_of_robots=N, show_figure=True,
                            initial_conditions=initial_positions,
@@ -162,7 +171,7 @@ center_waypoint_list = [] # Current formation center and waypoint
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
-with writer.saving(fig, "results/boids__leader_follower_sim.mp4", dpi=150):
+with writer.saving(fig, "results/boids_leader_follower_sim_last.mp4", dpi=150):
     for t in range(iterations):
         x = r.get_poses()
         u = np.zeros((2, N))

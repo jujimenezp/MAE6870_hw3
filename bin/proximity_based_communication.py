@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import PillowWriter
+from matplotlib.animation import FFMpegWriter
 import rps.robotarium as robotarium
 from rps.utilities.graph import topological_neighbors
 from rps.utilities.transformations import create_si_to_uni_dynamics
@@ -133,7 +133,7 @@ si_to_uni_dyn = create_si_to_uni_dynamics(
 # =========================================================
 ax = r._axes_handle
 fig = r._fig
-writer = PillowWriter(fps=20)
+writer = FFMpegWriter(fps=20)
 
 # One colour per robot
 CM = ['k', 'b', 'r', 'g', 'yellow', 'purple', 'orange', 'cyan']
@@ -183,7 +183,7 @@ ax.figure.canvas.mpl_connect('resize_event', on_resize)
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
-with writer.saving(fig, "results/proximity_based_communication.gif", dpi=150):
+with writer.saving(fig, "results/proximity_based_communication.mp4", dpi=150):
     for t in range(int(iterations)):
         x = r.get_poses()
         dxi = np.zeros((2, N))
@@ -260,7 +260,7 @@ plt.close(fig)
 # SAVE DATA
 # =========================================================
 # Stack list of (K, N) frames into (K, N, T) arrays
-np.save('proximity_based_formation.npy',      np.stack(vicon_list,      axis=2))
+#np.save('proximity_based_formation.npy',      np.stack(vicon_list,      axis=2))
 
 # Final debug report
 r.debug()

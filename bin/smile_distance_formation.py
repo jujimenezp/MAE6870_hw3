@@ -1,7 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from PIL import Image as img
-import io
+from matplotlib.animation import FFMpegWriter
 import rps.robotarium as robotarium
 from rps.utilities.graph import topological_neighbors
 from rps.utilities.transformations import create_si_to_uni_dynamics
@@ -123,7 +121,7 @@ si_to_uni_dyn = create_si_to_uni_dynamics(
 # =========================================================
 ax = r._axes_handle
 fig = r._fig
-frames = []
+writer = FFMpegWriter(fps=20)
 
 # One colour per robot
 CM = ['k', 'b', 'r', 'g', 'yellow', 'purple', 'orange', 'cyan']
@@ -173,79 +171,64 @@ ax.figure.canvas.mpl_connect('resize_event', on_resize)
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
+with writer.saving(fig, "results/smile_distance_sim.mp4", dpi=150):
+    for t in range(int(iterations)):
+        x = r.get_poses()
+        dxi = np.zeros((2, N))
 
-for t in range(int(iterations)):
-    x = r.get_poses()
-    dxi = np.zeros((2, N))
+        # ---------------------------------------------------------
+        # Record sensor data
+        # ---------------------------------------------------------
+        vicon_list.append(x)
+
+        # Formation control algorithm using edge tension energy
+        for i in range(N):
+            neighbors = topological_neighbors(L, i)
+            for j in neighbors:
+                # gradient = gain * (||actual||^2 - ||desired||^2) * (pos_j - pos_i)
+                dist_sq = np.linalg.norm(x[:2, i] - x[:2, j])**2
+                dxi[:, i] += formation_control_gain * (dist_sq - weights[i, j]**2) * (x[:2, j] - x[:2, i])
+
+        # ---------------------------------------------------------
+        # Velocity thresholding (3/4 of max linear velocity)
+        # ---------------------------------------------------------
+        norms = np.linalg.norm(dxi, axis=0)
+        threshold = 0.75 * r.MAX_LINEAR_VELOCITY
+        to_thresh = norms > threshold
+        
+        if np.any(to_thresh):
+            dxi[:, to_thresh] *= threshold / norms[to_thresh]
+
+        # ---------------------------------------------------------
+        # Safety and Dynamics conversion
+        # ---------------------------------------------------------
+        dxi = si_barrier_cert(dxi, x[:2, :])
+        dxu = si_to_uni_dyn(dxi, x)
 
     # ---------------------------------------------------------
-    # Record sensor data
-    # ---------------------------------------------------------
-    vicon_list.append(x)
+        # Update plot handles
+        # ---------------------------------------------------------
+        # Follower labels track their robots
+        for q in range(N):
+            follower_labels[q].set_position((x[0, q] - 0.15, x[1, q] + 0.15))
 
-    # Formation control algorithm using edge tension energy
-    for i in range(N):
-        neighbors = topological_neighbors(L, i)
-        for j in neighbors:
-            # gradient = gain * (||actual||^2 - ||desired||^2) * (pos_j - pos_i)
-            dist_sq = np.linalg.norm(x[:2, i] - x[:2, j])**2
-            dxi[:, i] += formation_control_gain * (dist_sq - weights[i, j]**2) * (x[:2, j] - x[:2, i])
+        # Follower-follower graph edges
+        for m in range(len(rows)):
+            lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
+            lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
 
-    # ---------------------------------------------------------
-    # Velocity thresholding (3/4 of max linear velocity)
-    # ---------------------------------------------------------
-    norms = np.linalg.norm(dxi, axis=0)
-    threshold = 0.75 * r.MAX_LINEAR_VELOCITY
-    to_thresh = norms > threshold
-    
-    if np.any(to_thresh):
-        dxi[:, to_thresh] *= threshold / norms[to_thresh]
+        # GIF
+        writer.grab_frame()
 
-    # ---------------------------------------------------------
-    # Safety and Dynamics conversion
-    # ---------------------------------------------------------
-    dxi = si_barrier_cert(dxi, x[:2, :])
-    dxu = si_to_uni_dyn(dxi, x)
+        r.set_velocities(np.arange(N), dxu)
+        r.step()
 
-# ---------------------------------------------------------
-    # Update plot handles
-    # ---------------------------------------------------------
-    # Follower labels track their robots
-    for q in range(N):
-        follower_labels[q].set_position((x[0, q] - 0.15, x[1, q] + 0.15))
-
-    # Follower-follower graph edges
-    for m in range(len(rows)):
-        lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
-        lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
-
-    # GIF
-    if t%3 == 0:
-        # Save figure to an in-memory buffer
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=300)
-        buf.seek(0)
-        frames.append(img.open(buf))
-    
-    r.set_velocities(np.arange(N), dxu)
-    r.step()
-
-plt.close(fig)
 
 # =========================================================
 # SAVE DATA
 # =========================================================
 # Stack list of (K, N) frames into (K, N, T) arrays
-np.save('smile_distance_formation.npy',      np.stack(vicon_list,      axis=2))
-
-# GIF
-frames[0].save(
-    "results/smile_distance_formation.gif",
-    save_all=True,
-    append_images=frames[1:],
-    duration=50,  # Milliseconds per frame (50ms = 20 fps)
-    loop=0        # 0 = infinite loop; 1 = play once
-)
+#np.save('smile_distance_formation.npy',      np.stack(vicon_list,      axis=2))
 
 # Final debug report
 r.debug()

@@ -1,4 +1,5 @@
 import numpy as np
+from matplotlib.animation import FFMpegWriter
 import rps.robotarium as robotarium
 from rps.utilities.transformations import create_si_to_uni_dynamics
 from rps.utilities.graph import completeGL, topological_neighbors
@@ -44,7 +45,16 @@ radius = 0.75
 # =========================================================
 # ROBOTARIUM INITIALIZATION
 # =========================================================
-initial_positions = generate_random_poses(N, width=2.6, height=1.3)
+#initial_positions = generate_random_poses(N, width=2.6, height=1.3)
+initial_positions = np.array([[-0.80404674,  1.07754154, -0.05938078, -0.33971185,  0.50913153,
+        -1.22743185,  0.77715337, -0.97767929,  0.10528889,  1.1625098 ,
+         0.60713809,  1.2582119 ],
+       [ 0.65043472, -0.14580535,  0.35230957, -0.19020842, -0.02596233,
+         0.07462124,  0.47771786, -0.53330415, -0.50706133, -0.64664932,
+        -0.59150971,  0.34699719],
+       [ 1.95899999,  0.792     ,  2.0940001 , -0.80900002,  0.064     ,
+        -0.33700001,  0.74900001, -1.58200002, -0.704     , -1.63800001,
+        -0.131     , -2.93099999]])
 print(initial_positions)
 r = robotarium.Robotarium(number_of_robots=N, show_figure=True,
                            initial_conditions=initial_positions,
@@ -91,6 +101,10 @@ state = 0
 # PLOT INITIALIZATION
 # =========================================================
 ax = r._axes_handle
+fig = r._fig
+
+#GIF
+writer = FFMpegWriter(fps=20)
 
 marker_size_goal = determine_marker_size(r, 0.20)
 font_size        = determine_font_size(r, 0.05)
@@ -152,86 +166,91 @@ center_waypoint_list = [] # Current formation center and waypoint
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
-for t in range(iterations):
-    x = r.get_poses()
-    u = np.zeros((2, N))
-    waypoint = waypoints[:, state]
-    c = np.average(x[:2,:], axis=1)
+with writer.saving(fig, "results/boids_sim.mp4", dpi=150):
+    for t in range(iterations):
+        x = r.get_poses()
+        u = np.zeros((2, N))
+        waypoint = waypoints[:, state]
+        c = np.average(x[:2,:], axis=1)
 
-    # ---------------------------------------------------------
-    # Record sensor data
-    # ---------------------------------------------------------
-    vicon_list.append(x)
-    center_waypoint_list.append([state,waypoint[0],waypoint[1],c[0],c[1]])
+        # ---------------------------------------------------------
+        # Record sensor data
+        # ---------------------------------------------------------
+        vicon_list.append(x)
+        center_waypoint_list.append([state,waypoint[0],waypoint[1],c[0],c[1]])
 
-    # -----------------------------------
-    # Update adjacency matrix, Laplacian, and weights
-    # -----------------------------------
-    adjacency_mat = adj_matrix(x[:2,:])
-    L = np.diag(np.sum(adjacency_mat, axis=1)) - adjacency_mat
+        # -----------------------------------
+        # Update adjacency matrix, Laplacian, and weights
+        # -----------------------------------
+        adjacency_mat = adj_matrix(x[:2,:])
+        L = np.diag(np.sum(adjacency_mat, axis=1)) - adjacency_mat
 
-    # 1. Formation control
-    for i in range(N):
-        neighbors = topological_neighbors(L, i)
-        for j in neighbors:
-            # separation
-            u[:, i] += k_s* (x[:2, i]-x[:2, j])/(np.sum((x[:2, i]-x[:2, j])**2)+eps**2)
-            # alignment
-            u[:,i] += k_a/len(neighbors) * (dxi[:,j] - dxi[:,i])
-            # cohesion
-            u[:,i] += k_c/len(neighbors) * (x[:2,j] - x[:2,i])
-        # Waypoint tracking (b_i = 1 for all i)
-        u[:,i] += k_p*(waypoint - x[:2,i]) - k_v * dxi[:,i]
+        # 1. Formation control
+        for i in range(N):
+            neighbors = topological_neighbors(L, i)
+            for j in neighbors:
+                # separation
+                u[:, i] += k_s* (x[:2, i]-x[:2, j])/(np.sum((x[:2, i]-x[:2, j])**2)+eps**2)
+                # alignment
+                u[:,i] += k_a/len(neighbors) * (dxi[:,j] - dxi[:,i])
+                # cohesion
+                u[:,i] += k_c/len(neighbors) * (x[:2,j] - x[:2,i])
+            # Waypoint tracking (b_i = 1 for all i)
+            u[:,i] += k_p*(waypoint - x[:2,i]) - k_v * dxi[:,i]
 
-    dxi += dt*u
+        dxi += dt*u
 
-    # Advance waypoint state if leader is close
-    dist_to_waypoint = np.array([np.linalg.norm(x[:2,i] - waypoint) for i in range(N)])
-    if min(dist_to_waypoint) < close_enough:
-        state = (state + 1) % waypoints.shape[1]
+        # Advance waypoint state if leader is close
+        dist_to_waypoint = np.array([np.linalg.norm(x[:2,i] - waypoint) for i in range(N)])
+        if min(dist_to_waypoint) < close_enough:
+            state = (state + 1) % waypoints.shape[1]
 
-    # 3. Velocity thresholding (3/4 of max linear velocity)
-    norms = np.linalg.norm(dxi, axis=0)
-    threshold = 0.75 * r.MAX_LINEAR_VELOCITY
-    to_thresh = (norms > threshold)
+        # 3. Velocity thresholding (3/4 of max linear velocity)
+        norms = np.linalg.norm(dxi, axis=0)
+        threshold = 0.75 * r.MAX_LINEAR_VELOCITY
+        to_thresh = (norms > threshold)
 
-    if np.any(to_thresh):
-        dxi[:, to_thresh] *= threshold / norms[to_thresh]
+        if np.any(to_thresh):
+            dxi[:, to_thresh] *= threshold / norms[to_thresh]
 
-    # 4. Conversion and Safety
-    # Convert SI velocities to unicycle commands
-    dxu = si_to_uni_dyn(dxi, x)
-    # Apply barrier certificate in unicycle space
-    dxu = uni_barrier_cert(dxu, x)
+        # 4. Conversion and Safety
+        # Convert SI velocities to unicycle commands
+        dxu = si_to_uni_dyn(dxi, x)
+        # Apply barrier certificate in unicycle space
+        dxu = uni_barrier_cert(dxu, x)
 
-    # ---------------------------------------------------------
-    # Update plot handles
-    # ---------------------------------------------------------
-    # Follower labels track their robots  
-    c_plot.set_offsets([c[0],c[1]])
+        # ---------------------------------------------------------
+        # Update plot handles
+        # ---------------------------------------------------------
+        # Follower labels track their robots  
+        c_plot.set_offsets([c[0],c[1]])
 
-    for m in range(len(rows)):
-        lf[m].remove()
-    # Edges (blue): L == 1 gives the directed edge source
-    rows, cols = np.where(L == -1)
-    # Each undirected edge appears once as a directed entry with value 1
-    lf = []
-    for k in range(len(rows)):
-        line, = ax.plot([x[0, rows[k]], x[0, cols[k]]],
-                        [x[1, rows[k]], x[1, cols[k]]],
-                        color='b', linewidth=line_width, zorder=1)
-        lf.append(line)
+        for m in range(len(rows)):
+            lf[m].remove()
+        # Edges (blue): L == 1 gives the directed edge source
+        rows, cols = np.where(L == -1)
+        # Each undirected edge appears once as a directed entry with value 1
+        lf = []
+        for k in range(len(rows)):
+            line, = ax.plot([x[0, rows[k]], x[0, cols[k]]],
+                            [x[1, rows[k]], x[1, cols[k]]],
+                            color='b', linewidth=line_width, zorder=1)
+            lf.append(line)
 
 
-    r.set_velocities(np.arange(N), dxu)
-    r.step()
+        #GIF
+        writer.grab_frame()
+
+
+        r.set_velocities(np.arange(N), dxu)
+        r.step()
 
 # =========================================================
 # SAVE DATA
 # =========================================================
 # Stack list of (K, N) frames into (K, N, T) arrays
-np.save('boids.npy', np.stack(vicon_list, axis=2))
-np.save('boids_centers.npy', np.transpose(center_waypoint_list))
+#np.save('boids.npy', np.stack(vicon_list, axis=2))
+#np.save('boids_centers.npy', np.transpose(center_waypoint_list))
 
 # Final debug report
 r.debug()

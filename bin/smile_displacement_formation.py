@@ -1,4 +1,5 @@
 import numpy as np
+from matplotlib.animation import FFMpegWriter
 import rps.robotarium as robotarium
 from rps.utilities.graph import topological_neighbors
 from rps.utilities.transformations import create_si_to_uni_dynamics
@@ -44,15 +45,15 @@ vicon_list      = []
 # ROBOTARIUM INITIALIZATION
 # =========================================================
 # Initializing with the updated Width/Height/Spacing from MATLAB
-initial_conditions = generate_random_poses(
-    N, 
-    width=2.5, 
-    height=1.5, 
-    spacing=0.6
-)
-# initial_conditions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826,  1.10838442, 1.11857774,  0.57111998],
-#  [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, -0.56014792, 0.28568192,  0.66814097],
-#  [-1.39302643,  0.58631807, -2.84446966, -0.57210556,  2.03477767,  0.44730757, -2.79137411,  0.06005052]])
+# initial_conditions = generate_random_poses(
+#     N, 
+#     width=2.5, 
+#     height=1.5, 
+#     spacing=0.6
+# )
+initial_conditions = np.array([[0.02576052,  0.54828738, -0.13920942, -1.00318009, -1.06295826,  1.10838442, 1.11857774,  0.57111998],
+ [-0.59096927,  0.0222632,   0.34629195, -0.51565993,  0.20769649, -0.56014792, 0.28568192,  0.66814097],
+ [-1.39302643,  0.58631807, -2.84446966, -0.57210556,  2.03477767,  0.44730757, -2.79137411,  0.06005052]])
 print(initial_conditions)
 
 r = robotarium.Robotarium(
@@ -108,6 +109,9 @@ si_to_uni_dyn = create_si_to_uni_dynamics(
 # PLOT INITIALIZATION
 # =========================================================
 ax = r._axes_handle
+fig = r._fig
+
+writer = FFMpegWriter(fps=20)
 
 # One colour per robot
 CM = ['k', 'b', 'r', 'g', 'yellow', 'purple', 'orange', 'cyan']
@@ -157,59 +161,62 @@ ax.figure.canvas.mpl_connect('resize_event', on_resize)
 # =========================================================
 # MAIN SIMULATION LOOP
 # =========================================================
+with writer.saving(fig, "results/smile_displacement_sim.mp4", dpi=150):
+    for t in range(int(iterations)):
+        x = r.get_poses()
+        dxi = np.zeros((2, N))
 
-for t in range(int(iterations)):
-    x = r.get_poses()
-    dxi = np.zeros((2, N))
+        # ---------------------------------------------------------
+        # Record sensor data
+        # ---------------------------------------------------------
+        vicon_list.append(x)
+
+        # Formation control algorithm using edge tension energy
+        for i in range(N):
+            neighbors = topological_neighbors(L, i)
+            for j in neighbors:
+                # gradient = gain * (||actual||^2 - ||desired||^2) * (pos_j - pos_i)
+                dxi[:, i] += formation_control_gain * ((x[:2,j]-desired_positions[:,j]) - (x[:2,i]-desired_positions[:,i]))
+
+        # ---------------------------------------------------------
+        # Velocity thresholding (3/4 of max linear velocity)
+        # ---------------------------------------------------------
+        norms = np.linalg.norm(dxi, axis=0)
+        threshold = 0.75 * r.MAX_LINEAR_VELOCITY
+        to_thresh = norms > threshold
+        
+        if np.any(to_thresh):
+            dxi[:, to_thresh] *= threshold / norms[to_thresh]
+
+        # ---------------------------------------------------------
+        # Safety and Dynamics conversion
+        # ---------------------------------------------------------
+        dxi = si_barrier_cert(dxi, x[:2, :])
+        dxu = si_to_uni_dyn(dxi, x)
 
     # ---------------------------------------------------------
-    # Record sensor data
-    # ---------------------------------------------------------
-    vicon_list.append(x)
+        # Update plot handles
+        # ---------------------------------------------------------
+        # Follower labels track their robots
+        for q in range(N):
+            follower_labels[q].set_position((x[0, q] - 0.15, x[1, q] + 0.15))
 
-    # Formation control algorithm using edge tension energy
-    for i in range(N):
-        neighbors = topological_neighbors(L, i)
-        for j in neighbors:
-            # gradient = gain * (||actual||^2 - ||desired||^2) * (pos_j - pos_i)
-            dxi[:, i] += formation_control_gain * ((x[:2,j]-desired_positions[:,j]) - (x[:2,i]-desired_positions[:,i]))
+        # Follower-follower graph edges
+        for m in range(len(rows)):
+            lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
+            lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
 
-    # ---------------------------------------------------------
-    # Velocity thresholding (3/4 of max linear velocity)
-    # ---------------------------------------------------------
-    norms = np.linalg.norm(dxi, axis=0)
-    threshold = 0.75 * r.MAX_LINEAR_VELOCITY
-    to_thresh = norms > threshold
-    
-    if np.any(to_thresh):
-        dxi[:, to_thresh] *= threshold / norms[to_thresh]
+        #GIF
+        writer.grab_frame()
 
-    # ---------------------------------------------------------
-    # Safety and Dynamics conversion
-    # ---------------------------------------------------------
-    dxi = si_barrier_cert(dxi, x[:2, :])
-    dxu = si_to_uni_dyn(dxi, x)
-
-# ---------------------------------------------------------
-    # Update plot handles
-    # ---------------------------------------------------------
-    # Follower labels track their robots
-    for q in range(N):
-        follower_labels[q].set_position((x[0, q] - 0.15, x[1, q] + 0.15))
-
-    # Follower-follower graph edges
-    for m in range(len(rows)):
-        lf[m].set_xdata([x[0, rows[m]], x[0, cols[m]]])
-        lf[m].set_ydata([x[1, rows[m]], x[1, cols[m]]])
-    
-    r.set_velocities(np.arange(N), dxu)
-    r.step()
+        r.set_velocities(np.arange(N), dxu)
+        r.step()
 
 # =========================================================
 # SAVE DATA
 # =========================================================
 # Stack list of (K, N) frames into (K, N, T) arrays
-np.save('smile_displacement_formation.npy',      np.stack(vicon_list,      axis=2))
+#np.save('smile_displacement_formation.npy',      np.stack(vicon_list,      axis=2))
 
 # Final debug report
 r.debug()
